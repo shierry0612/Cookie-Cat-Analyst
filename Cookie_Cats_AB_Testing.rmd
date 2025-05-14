@@ -1,0 +1,254 @@
+---
+title: "Bài thực hành số 1"
+author: "Nhóm 26"
+date: "10/28/2024"
+output: html_document
+---
+
+## Thông tin thành viên
+
+Lương Thanh Nam - 222800
+
+Trần Gia Huy - 22280040
+
+Mai Thị Kim Ngân -22280058
+
+Huỳnh Hà Anh Thư -22280089
+
+Lê Thanh Thùy - 22280094
+
+## 1.Bảng tóm tắt, khái quát về dữ liệu.
+
+```{r}
+#Cài đặt các thư viện cần thiết
+library(tidyverse)
+library(readr)
+library(ggplot2)
+library(janitor)
+library(plotly)
+library(hrbrthemes)
+
+library(boot)
+library(dplyr)
+library(ggplot2)
+
+```
+
+## 
+
+```{r}
+cookie_cats <- read_csv('cookie_cats.csv') |> clean_names()
+glimpse(cookie_cats)
+cookie_cats |> group_by(version) |> summarise(n = n(), mean_sum_gamerounds = mean(sum_gamerounds), sd_sum_gamerounds = sd(sum_gamerounds), retention_1 = mean(retention_1), retention_7 = mean(retention_7))
+```
+
+-   Về số lượng người chơi: 2 cổng có số lượng chênh lệch ít (cổng 30 ít hơn 700 người chơi)
+
+-   Về trung bình tổng số vòng chơi: gần bằng nhau (cổng 30 nhiều hơn xấp xỉ 1 vòng)
+
+-   Về phương sai của số lượng vòng chơi: chênh lệch nhiều (cổng 30 có độ chênh lệch trong dữ liệu nhiều hơn cổng 40 là 2.5 lần)
+
+-   Tỷ lệ người chơi quay lại, chơi sau 1 và 7 ngày cài đặt: giống nhau ở cả 2 cổng
+
+```{r}
+ggplot(cookie_cats, aes(x = version, y = sum_gamerounds, fill = version)) +
+  geom_violin() +
+  geom_boxplot(width = 0.1) +
+  labs(x = "Gate", y = "Sum of Gamerounds") + 
+  theme_bw() + theme(legend.position = "none")
+```
+
+Để thấy rõ hơn sự phân bố của dữ liệu, phóng to vùng (0, 500)
+
+```{r}
+ggplot(cookie_cats, aes(x = version, y = sum_gamerounds, fill = version)) +
+  geom_violin() +
+  geom_boxplot(width = 0.1) +
+  labs(x = "Gate", y = "Sum of Gamerounds") + 
+  theme_bw() + theme(legend.position = "none") + 
+  ylim(0, 500)
+```
+
+Từ biểu đồ, nhận thấy trung bình của mỗi mẫu giống nhau nên ta sẽ kiểm định 2 phía cho trung bình tổng số vòng chơi với độ tin cậy 95% để rút ra nhận xét sự khác nhau của cổng chơi có ảnh hưởng đến tổng doanh thu hay không.
+
+```{r}
+retention_rates <- cookie_cats |>  group_by(version) |>  summarise(
+    retention_1_rate = mean(retention_1),
+    retention_7_rate = mean(retention_7)) |>  
+  pivot_longer(cols = starts_with("retention"), names_to = "retention_type", values_to = "rate")
+
+ggplot(retention_rates, aes(x = version, y = rate, fill = retention_type)) + 
+  geom_col(position = "dodge") +
+  theme_minimal() +
+  labs(y = "Retention Rate", x = "Version", title = "Retention Rates for Day 1 and Day 7 by Version") +
+  scale_fill_manual(values = c("retention_1_rate" = "orange2", "retention_7_rate" = "green4"), labels = c("Day 1 Retention", "Day 7 Retention")) +
+  theme(legend.title = element_blank())
+```
+
+Các tỷ lệ người chơi quay lại chơi sau 1 ngày và 7 ngày ở hai cổng có sự tương đồng với nhau. Vì vậy, thực hiện kiểm định 2 phía cho tỷ lệ của retention_1 và retention_7 với độ tin cậy 95% để kiểm tra xem sự bắt đầu ở cổng chơi khác nhau có ảnh hưởng đến trải nghiệm của người chơi hay không.
+
+```{r}
+ggplot(cookie_cats, aes(x = sum_gamerounds)) +
+  geom_histogram(binwidth = 8, fill = "skyblue", color = "black") +
+  labs(title = "Histogram for sum of gamerounds", x = "Number of gamerounds", y = "Frequency") +
+  xlim(0, 500) + 
+  theme_minimal()
+```
+
+Biểu đồ histogram cho thấy không có phân phối chuẩn, đồ thị lệch về phía bên phải, tổng số lượng vòng chơi chủ yếu từ khoảng 0-50 vòng chơi.
+
+## 2. Đề ra các phương án xử lý dữ liệu dựa trên các công cụ của A/B testing nhằm đưa ra bằng chứng để trả lời cho câu hỏi "Việc thay đổi cổng băt đầu có thực sự ảnh hưởng tới doanh thu cũng như trải nghiệm của người chơi?".
+
+Đầu tiên, phân tích "Việc thay đổi cổng băt đầu có thực sự ảnh hưởng tới doanh thu " chúng ta sẽ phân tích trên số lượng vòng chơi (sum_gameround )
+
+Mục tiêu: Xác định liệu việc thay đổi cổng từ cấp 30 lên cấp 40 có ảnh hưởng đến số vòng chơi trung bình của người chơi hay không do số vòng chơi trung bình có thể phản ánh mức độ tham gia của người chơi và tiềm năng doanh thu từ trò chơi.
+
+Phương pháp:
+
+Kiểm tra phân phối của biến sum_gamerounds: Tạo biểu đồ phân phối (histogram ) cho số vòng chơi để xem liệu dữ liệu có tuân theo phân phối chuẩn hay không. Nếu dữ liệu phân phối chuẩn, có thể sử dụng kiểm định t-test. Nếu không phân phối chuẩn, sử dụng kiểm định bootstrap.
+
+So sánh số vòng chơi trung bình giữa hai nhóm:
+
+Sử dụng kiểm định bootstrap để xây dựng phân phối mẫu cho sự khác biệt trung bình giữa hai nhóm. Thực hiện bootstrap với số lần lặp đủ lớn (ví dụ: 1000 lần) để tính p-value và khoảng tin cậy cho sự khác biệt trung bình.
+
+Tiếp theo, phân tích "Việc thay đổi cổng băt đầu có thực sự ảnh hưởng tới trải nghiệm người chơi " dựa trên retetion_1 và retetion_7 .
+
+Phương án kiểm định sự khác biệt về tỷ lệ giữ chân sau 7 ngày: Sử dụng kiểm định hoán vị cho tỷ lệ để so sánh tỷ lệ giữ chân sau 7 ngày giữa hai nhóm. Điều này giúp xác định liệu có sự khác biệt có ý nghĩa thống kê về tỷ lệ giữ chân dài hạn giữa hai nhóm hay không.
+
+Phương án kiểm định sự khác biệt về tỷ lệ giữ chân sau 1 ngày: Sử dụng kiểm định hoán vị cho tỷ lệ để so sánh tỷ lệ giữ chân sau 1 ngày giữa hai nhóm. Điều này giúp xác định liệu có sự khác biệt có ý nghĩa thống kê về tỷ lệ giữ chân dài hạn giữa hai nhóm hay không.
+
+## 3.Hãy cố gắng tận dụng hết các biến được cung cấp, để xử lý dữ liệu theo các phương án đã đề ra.
+
+Kiểm định giả thuyết:
+
+H0: Trung bình số vòng trò chơi mà người chơi đã chơi trong 2 tuần đầu tiên sau khi cài đặt là giống nhau với 2 cổng
+
+H1: Trung bình số vòng trò chơi mà người chơi đã chơi trong 2 tuần đầu tiên sau khi cài đặt là giống nhau với 2 cổng
+
+```{r}
+bootstrap_permutation_test <- function(x, y, R, alter) {
+  # Tách dữ liệu theo nhãn
+  data_split <- split(x, y)
+  group_A <- data_split[[1]]
+  group_B <- data_split[[2]]
+  
+  # Tính toán trung bình của hai nhóm
+  mean_A <- mean(group_A)
+  mean_B <- mean(group_B)
+  
+  # Tạo các mẫu bootstrap
+  res_bootstrap <- numeric(R)
+  for (i in 1:R) {
+    sample_A <- sample(group_A, length(group_A), replace = TRUE)
+    sample_B <- sample(group_B, length(group_B), replace = TRUE)
+    res_bootstrap[i] <- mean(sample_A) - mean(sample_B)
+  }
+  
+  # Thực hiện hoán vị để tính p-value
+  combined_data <- c(group_A, group_B)
+  res_permutation <- numeric(R)
+  for (i in 1:R) {
+    permuted_idx <- sample(1:length(combined_data), length(group_A))
+    perm_A <- combined_data[permuted_idx]
+    perm_B <- combined_data[-permuted_idx]
+    res_permutation[i] <- mean(perm_A) - mean(perm_B)
+  }
+  
+  # Tính giá trị p-value theo loại kiểm định
+  if (alter == "two-sided") {
+    p_value <- mean(abs(res_permutation) >= abs(mean_A - mean_B))
+  } else if (alter == "left") {
+    p_value <- mean(res_permutation <= (mean_A - mean_B))
+  } else if (alter == "right") {
+    p_value <- mean(res_permutation >= (mean_A - mean_B))
+  }
+  
+  return(list(
+    mean_A = mean_A,
+    mean_B = mean_B,
+    p_value = p_value
+  ))
+}
+bootstrap_permutation_test(cookie_cats$sum_gamerounds,cookie_cats$version,R=1000,alter='two-sided')
+
+```
+
+p_value=0.464
+
+Kiểm định permutation test cho tỉ lệ người chơi có quay lại sau 1 ngày cài đặt.
+
+H0: Tỉ lệ người chơi có quay lại và chơi sau 1 ngày cài đặt không bị ảnh hưởng bởi version mà người chơi được đưa vào
+
+H1: Tỉ lệ người chơi có quay lại và chơi sau 1 ngày cài đặt bị ảnh hưởng bởi version mà người chơi được đưa vào
+
+```{r}
+perm_fun_prop <- function(x, nA, nB, R) {
+  n <- nA + nB
+  prop_diff <- numeric(R)
+  
+  for (i in 1:R) {
+    # Chọn mẫu ngẫu nhiên cho nhóm A và nhóm B
+    idx_a <- sample(x = 1:n, size = nA)
+    idx_b <- setdiff(x = 1:n, y = idx_a)
+    
+    # Tính tỷ lệ 1 cho mỗi nhóm
+    prop_diff[i] <- mean(x[idx_a] == 1) - mean(x[idx_b] == 1)
+  }
+  
+  return(prop_diff)
+}
+
+set.seed(21)
+diff_mean_prob <- perm_fun_prop(cookie_cats$retention_1, nA = 44700, nB = 45489, R = 1000)
+mean_a <- mean(cookie_cats$retention_1[cookie_cats$version == 'gate_30'])
+mean_b <- mean(cookie_cats$retention_1[cookie_cats$version == 'gate_40'])
+mean(abs(diff_mean_prob) > abs(mean_a - mean_b) )
+```
+
+p_value=0.073 \> 0.05, chưa đủ để bác bỏ H0.
+
+Kiểm định giả thuyết:
+
+H0:Tỉ lệ người chơi có quay lại và chơi sau 7 ngày cài đặt không bị ảnh hưởng bởi version mà người chơi được đưa vào
+
+H1: Tỉ lệ người chơi có quay lại và chơi sau 7 ngày cài đặt bị ảnh hưởng bởi version mà người chơi được đưa vào
+
+```{r}
+perm_fun_prop <- function(x, nA, nB, R) {
+  n <- nA + nB
+  prop_diff <- numeric(R)
+  
+  for (i in 1:R) {
+    # Chọn mẫu ngẫu nhiên cho nhóm A và nhóm B
+    idx_a <- sample(x = 1:n, size = nA)
+    idx_b <- setdiff(x = 1:n, y = idx_a)
+    
+    # Tính tỷ lệ 1 cho mỗi nhóm
+    prop_diff[i] <- mean(x[idx_a] == 1) - mean(x[idx_b] == 1)
+  }
+  
+  return(prop_diff)
+}
+
+set.seed(21)
+diff_mean_prob <- perm_fun_prop(cookie_cats$retention_7, nA = 44700, nB = 45489, R = 1000)
+mean_a <- mean(cookie_cats$retention_7[cookie_cats$version == 'gate_30'])
+mean_b <- mean(cookie_cats$retention_7[cookie_cats$version == 'gate_40'])
+mean(abs(diff_mean_prob) > abs(mean_a - mean_b) )
+```
+
+p_value=0.03 \< 0.05, ta bác bỏ H0.
+
+## 4. Viết các nhận xét và kết luận
+
+-   *Về mức độ tham gia của người chơi (doanh thu tiềm năng):*
+    -   Phân tích số vòng chơi trung bình (sum_gamerounds) giữa hai nhóm gate_30 và gate_40 không cho thấy sự khác biệt có ý nghĩa thống kê (p-value = 0.464 từ kiểm định bootstrap).
+    -   Điều này có nghĩa là việc chuyển cổng từ cấp 30 lên cấp 40 không có tác động đáng kể đến số vòng chơi trung bình của người chơi trong hai tuần đầu sau khi cài đặt.
+-   *Về trải nghiệm người chơi - khả năng giữ chân người chơi:*
+    -   Sau 1 ngày (retention_1): Tỷ lệ giữ chân sau 1 ngày giữa hai nhóm gate_30 và gate_40 không có sự khác biệt có ý nghĩa thống kê (p-value = 0.073). Vì vậy, việc thay đổi cổng không ảnh hưởng đến khả năng quay lại sau 1 ngày của người chơi.
+    -   Sau 7 ngày (retention_7): Tỷ lệ giữ chân sau 7 ngày ở nhóm gate_40 với p-value = 0.03, cho thấy sự khác biệt có ý nghĩa thống kê.Vì vậy, việc chuyển cổng lên cấp 40 có tác động tích cực đến khả năng giữ chân người chơi lâu dài, giúp người chơi có xu hướng quay lại trò chơi sau một tuần, một dấu hiệu tích cực cho trải nghiệm người chơi.
+-   *Kết luận*
+    -   Doanh thu tiềm năng: Việc thay đổi cấp độ cổng từ 30 lên 40 *không ảnh hưởng đến doanh thu tiềm năng* từ số vòng chơi, vì không có sự khác biệt đáng kể trong số vòng chơi giữa hai nhóm.
+    -   Trải nghiệm người chơi: +Thay đổi cổng từ cấp 30 lên cấp 40 không ảnh hưởng tiêu cực đến trải nghiệm ngắn hạn, vì tỷ lệ giữ chân sau 1 ngày không thay đổi.
+    -   Trong dài hạn, thay đổi này lại tăng cường khả năng giữ chân người chơi sau 7 ngày, cho thấy tác động tích cực đến trải nghiệm lâu dài của người chơi.
+-   *Tổng kết:* Thay đổi cấp độ cổng từ 30 lên 40 có ảnh hưởng tích cực đến trải nghiệm người chơi trong dài hạn, giúp cải thiện tỷ lệ giữ chân người chơi mà không làm giảm mức độ tham gia trong ngắn hạn. Mặc dù không có sự thay đổi đáng kể về doanh thu tiềm năng từ số vòng chơi, nhưng khả năng giữ chân người chơi lâu dài hơn có thể tạo ra lợi ích kinh tế gián tiếp bằng cách thúc đẩy sự gắn bó và trung thành với trò chơi. Nhà phát triển nên cân nhắc giữ cổng ở cấp 40 để tối ưu trải nghiệm người chơi và tăng trưởng bền vững của trò chơi.
